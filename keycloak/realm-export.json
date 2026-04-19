@@ -1,0 +1,214 @@
+{
+  "realm": "trading",
+  "enabled": true,
+  "sslRequired": "none",
+  "accessTokenLifespan": 900,
+  "ssoSessionIdleTimeout": 1800,
+  "registrationAllowed": false,
+  "roles": {
+    "realm": [
+      { "name": "desk-equities-access", "description": "Access to equities desk data" },
+      { "name": "desk-rates-access", "description": "Access to rates desk data" },
+      { "name": "desk-vol-access", "description": "Access to vol-arb desk data" },
+      { "name": "bloomberg:read", "description": "Read access to Bloomberg MCP" },
+      { "name": "risk:read", "description": "Read access to Risk MCP" },
+      { "name": "research:read", "description": "Read access to Research MCP" },
+      { "name": "default-roles-trading", "description": "Default roles", "composite": true, "composites": { "realm": ["bloomberg:read", "risk:read", "research:read"] } }
+    ]
+  },
+  "groups": [
+    {
+      "name": "Equities_Traders",
+      "realmRoles": ["desk-equities-access", "bloomberg:read", "risk:read", "research:read"]
+    },
+    {
+      "name": "Rates_RV",
+      "realmRoles": ["desk-rates-access", "bloomberg:read", "risk:read", "research:read"]
+    },
+    {
+      "name": "Vol_Arb",
+      "realmRoles": ["desk-vol-access", "bloomberg:read", "risk:read", "research:read"]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "mcp-gateway",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "gateway-secret-2024",
+      "serviceAccountsEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": true,
+      "protocol": "openid-connect",
+      "redirectUris": ["*"],
+      "webOrigins": ["*"],
+      "attributes": {
+        "oidc.ciba.grant.enabled": "false",
+        "oauth2.device.authorization.grant.enabled": "true"
+      },
+      "protocolMappers": [
+        {
+          "name": "desk_access_mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "desk_access",
+            "claim.name": "desk_access",
+            "jsonType.label": "JSON",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "multivalued": "true"
+          }
+        },
+        {
+          "name": "realm_roles_mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "claim.name": "realm_roles",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "multivalued": "true"
+          }
+        },
+        {
+          "name": "audience_mapper_bloomberg",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "bloomberg-mcp",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "audience_mapper_risk",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "risk-mcp",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "audience_mapper_research",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "research-mcp",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "bloomberg-mcp",
+      "enabled": true,
+      "publicClient": false,
+      "bearerOnly": true,
+      "protocol": "openid-connect",
+      "secret": "bloomberg-mcp-secret",
+      "attributes": {}
+    },
+    {
+      "clientId": "risk-mcp",
+      "enabled": true,
+      "publicClient": false,
+      "bearerOnly": true,
+      "protocol": "openid-connect",
+      "secret": "risk-mcp-secret",
+      "attributes": {}
+    },
+    {
+      "clientId": "research-mcp",
+      "enabled": true,
+      "publicClient": false,
+      "bearerOnly": true,
+      "protocol": "openid-connect",
+      "secret": "research-mcp-secret",
+      "attributes": {}
+    },
+    {
+      "clientId": "demo-agent",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "protocol": "openid-connect",
+      "redirectUris": ["http://localhost:*"],
+      "webOrigins": ["*"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "oauth2.device.authorization.grant.enabled": "true"
+      }
+    }
+  ],
+  "users": [
+    {
+      "username": "alice-pm",
+      "email": "alice@contextforge.internal",
+      "firstName": "Alice",
+      "lastName": "Morgan",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "alice-demo-2024",
+          "temporary": false
+        }
+      ],
+      "groups": ["Equities_Traders"],
+      "attributes": {
+        "desk_access": ["equities"]
+      }
+    },
+    {
+      "username": "bob-pm",
+      "email": "bob@contextforge.internal",
+      "firstName": "Bob",
+      "lastName": "Chen",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "bob-demo-2024",
+          "temporary": false
+        }
+      ],
+      "groups": ["Rates_RV"],
+      "attributes": {
+        "desk_access": ["rates"]
+      }
+    },
+    {
+      "username": "charlie-pm",
+      "email": "charlie@contextforge.internal",
+      "firstName": "Charlie",
+      "lastName": "Davis",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "charlie-demo-2024",
+          "temporary": false
+        }
+      ],
+      "groups": ["Equities_Traders", "Vol_Arb"],
+      "attributes": {
+        "desk_access": ["equities", "vol"]
+      }
+    }
+  ],
+  "scopeMappings": [
+    {
+      "client": "mcp-gateway",
+      "roles": ["bloomberg:read", "risk:read", "research:read"]
+    }
+  ]
+}

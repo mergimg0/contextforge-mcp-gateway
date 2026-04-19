@@ -1,0 +1,282 @@
+# Plan Templates Configuration
+# Defines the tool call groups for each ClaimType.
+# This file is for documentation and future runtime override support.
+# The canonical implementation lives in planner/plan_templates.py.
+
+templates:
+
+  vol_mispricing:
+    rationale: >
+      Validate implied-vol mispricing by comparing IV to realised vol over a
+      90-day window, stress-testing with a vol-spike scenario, and checking
+      the options desk's existing vega exposure.
+    groups:
+      - name: market_data
+        description: "IV/RV snapshot + 90-day history + event calendar"
+        parallel: true
+        calls:
+          - server: bloomberg
+            tool: get_ref_data
+            fields: [PX_LAST, IMPLIED_VOL_30D, HIST_REALIZED_VOL_30D, EARN_ANNOUNCE_DT]
+            purpose: "IV-RV spread snapshot and earnings catalyst check"
+          - server: bloomberg
+            tool: get_history
+            lookback_days: 90
+            frequency: daily
+            purpose: "Historical IV-RV spread for percentile ranking"
+
+      - name: risk_analysis
+        description: "Greeks aggregation and vol-spike scenario"
+        depends_on: [market_data]
+        parallel: true
+        calls:
+          - server: risk
+            tool: get_greeks
+            purpose: "Current vega exposure and concentration check"
+          - server: risk
+            tool: run_scenario
+            scenario: vol_spike
+            magnitude: 2.0
+            purpose: "Bound downside if IV mispricing extends"
+
+      - name: research_context
+        description: "Analyst research for vol catalyst context"
+        depends_on: [market_data]
+        required: false
+        calls:
+          - server: research
+            tool: search_research
+            purpose: "Recent analyst commentary on vol catalysts"
+
+  momentum:
+    rationale: >
+      Validate momentum signal by computing price returns and RSI over a
+      90-day window, comparing to sector benchmark, and stress-testing
+      reversal risk via equity-crash scenario.
+    groups:
+      - name: market_data
+        description: "Price history + sector benchmark + current snapshot"
+        parallel: true
+        calls:
+          - server: bloomberg
+            tool: get_history
+            lookback_days: 90
+            frequency: daily
+            purpose: "Price return and trend strength over lookback"
+          - server: bloomberg
+            tool: get_history
+            ticker: sector_index
+            lookback_days: 90
+            frequency: daily
+            purpose: "Sector benchmark for relative momentum divergence"
+            required: false
+          - server: bloomberg
+            tool: get_ref_data
+            fields: [PX_LAST, VOLUME, PE_RATIO, HIST_REALIZED_VOL_30D]
+            purpose: "Current valuation and volume context"
+
+      - name: risk_analysis
+        description: "VaR sizing and equity-crash scenario"
+        depends_on: [market_data]
+        parallel: true
+        calls:
+          - server: risk
+            tool: calculate_var
+            metric: var
+            confidence: 0.99
+            horizon_days: 5
+            purpose: "5-day VaR for momentum position sizing"
+          - server: risk
+            tool: run_scenario
+            scenario: equity_crash
+            magnitude: 1.5
+            purpose: "Reversal risk bound if momentum breaks down"
+
+      - name: research_context
+        description: "Sector momentum and technical research"
+        depends_on: [market_data]
+        required: false
+        calls:
+          - server: research
+            tool: search_research
+            purpose: "Analyst notes on sector momentum and technical setup"
+
+  relative_value:
+    rationale: >
+      Validate relative-value mispricing by computing 1-year spread z-score,
+      running a custom stress scenario for continued divergence, and checking
+      fundamental research on spread drivers.
+    groups:
+      - name: market_data
+        description: "Current snapshot + 1-year weekly history for z-score"
+        parallel: true
+        calls:
+          - server: bloomberg
+            tool: get_ref_data
+            fields: [PX_LAST, PE_RATIO, HIST_REALIZED_VOL_30D, EQY_WEIGHTED_AVG_PX]
+            purpose: "Current valuation vs. historical averages"
+          - server: bloomberg
+            tool: get_history
+            lookback_days: 252
+            frequency: weekly
+            purpose: "1-year weekly history for spread z-score and percentile rank"
+
+      - name: risk_analysis
+        description: "Scenario for spread divergence + CVaR tail risk"
+        depends_on: [market_data]
+        parallel: true
+        calls:
+          - server: risk
+            tool: run_scenario
+            scenario: custom
+            magnitude: 2.0
+            purpose: "Impact if spread continues to diverge rather than converge"
+          - server: risk
+            tool: calculate_var
+            metric: cvar
+            confidence: 0.95
+            horizon_days: 10
+            purpose: "10-day CVaR for RV position tail risk"
+
+      - name: research_context
+        description: "Fundamental research on spread drivers and catalysts"
+        depends_on: [market_data]
+        required: false
+        calls:
+          - server: research
+            tool: search_research
+            purpose: "Analyst research on fundamental drivers and convergence catalysts"
+
+  mean_reversion:
+    rationale: >
+      Validate mean-reversion thesis by computing z-score vs. 1-year mean,
+      stress-testing further deviation, and anchoring to fundamental research.
+    groups:
+      - name: market_data
+        description: "1-year weekly history for z-score + current snapshot"
+        parallel: true
+        calls:
+          - server: bloomberg
+            tool: get_history
+            lookback_days: 252
+            frequency: weekly
+            purpose: "Establish statistical mean and measure current deviation"
+          - server: bloomberg
+            tool: get_ref_data
+            fields: [PX_LAST, PE_RATIO, HIST_REALIZED_VOL_30D]
+            purpose: "Current snapshot to compare against long-run mean"
+
+      - name: risk_analysis
+        description: "CVaR if mean-reversion stalls + extreme-deviation scenario"
+        depends_on: [market_data]
+        parallel: true
+        calls:
+          - server: risk
+            tool: calculate_var
+            metric: cvar
+            confidence: 0.95
+            horizon_days: 10
+            purpose: "Tail risk if mean-reversion is delayed"
+          - server: risk
+            tool: run_scenario
+            scenario: custom
+            magnitude: 3.0
+            purpose: "Extreme stress: deviation extends a further 3 sigma"
+
+      - name: research_context
+        description: "Research on fundamental anchors and reversion catalysts"
+        depends_on: [market_data]
+        required: false
+        calls:
+          - server: research
+            tool: search_research
+            purpose: "Analyst views on fundamental anchors and reversion triggers"
+
+  event_driven:
+    rationale: >
+      Validate event-driven thesis by quantifying the implied move from
+      straddle pricing, checking current Greeks exposure, and stress-testing
+      negative event outcomes.
+    groups:
+      - name: market_data
+        description: "Event date + implied move + pre-event price history"
+        parallel: true
+        calls:
+          - server: bloomberg
+            tool: get_ref_data
+            fields: [EARN_ANNOUNCE_DT, IMPLIED_VOL_30D, HIST_REALIZED_VOL_30D, PX_LAST, DVD_YILD]
+            purpose: "Event date and ATM IV for implied-move quantification"
+          - server: bloomberg
+            tool: get_history
+            lookback_days: 90
+            frequency: daily
+            purpose: "Pre-event history to compare vs. prior implied moves"
+
+      - name: risk_analysis
+        description: "Greeks pre-event + negative-event scenario"
+        depends_on: [market_data]
+        parallel: true
+        calls:
+          - server: risk
+            tool: get_greeks
+            purpose: "Current event sensitivity of existing book"
+          - server: risk
+            tool: run_scenario
+            scenario: equity_crash
+            magnitude: 2.0
+            purpose: "Downside if event outcome is negative"
+
+      - name: research_context
+        description: "Analyst estimates and event-study research"
+        depends_on: [market_data]
+        required: false
+        calls:
+          - server: research
+            tool: search_research
+            purpose: "Earnings estimates and historical event-study analysis"
+
+  macro:
+    rationale: >
+      Validate macro thesis by analysing 1-year trend in primary instrument,
+      cross-asset correlations, rate-shock scenario, and macro research.
+    groups:
+      - name: market_data
+        description: "1-year weekly history + cross-asset snapshot"
+        parallel: true
+        calls:
+          - server: bloomberg
+            tool: get_history
+            lookback_days: 252
+            frequency: weekly
+            purpose: "Macro trend and deviation from long-run equilibrium"
+          - server: bloomberg
+            tool: get_ref_data
+            tickers: [asset, "SPX Index"]
+            fields: [PX_LAST, HIST_REALIZED_VOL_30D, IMPLIED_VOL_30D]
+            purpose: "Cross-asset snapshot for macro regime assessment"
+
+      - name: risk_analysis
+        description: "Rate-shock scenario + 10-day VaR"
+        depends_on: [market_data]
+        parallel: true
+        calls:
+          - server: risk
+            tool: run_scenario
+            scenario: rate_shock
+            magnitude: 2.0
+            purpose: "Portfolio duration and convexity under 2x rate shock"
+          - server: risk
+            tool: calculate_var
+            metric: var
+            confidence: 0.99
+            horizon_days: 10
+            purpose: "10-day VaR for macro position sizing"
+
+      - name: research_context
+        description: "Central bank and macro research"
+        depends_on: [market_data]
+        required: false
+        calls:
+          - server: research
+            tool: search_research
+            purpose: "Macro research on rate differentials and central bank policy"

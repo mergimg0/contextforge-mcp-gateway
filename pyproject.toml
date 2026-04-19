@@ -1,0 +1,25 @@
+[project]
+name = "contextforge-mcp-gateway-monorepo"
+version = "1.0.0"
+description = "ContextForge MCP Gateway — 3-Phase Architecture"
+requires-python = ">=3.11"
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.25.0",
+    "httpx>=0.28.0",
+    "pyjwt[crypto]>=2.10.0",
+]
+demo = [
+    "httpx>=0.28.0",
+    "pyjwt[crypto]>=2.10.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

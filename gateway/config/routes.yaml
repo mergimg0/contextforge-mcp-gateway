@@ -1,0 +1,22 @@
+gateway:
+  routes:
+    - name: bloomberg
+      path_prefix: /bloomberg
+      backend_url: http://bloomberg-mcp:8010/mcp
+      required_scope: bloomberg:read
+      exchange_audience: bloomberg-mcp
+      timeout: 30
+
+    - name: risk
+      path_prefix: /risk
+      backend_url: http://risk-mcp:8011/mcp
+      required_scope: risk:read
+      exchange_audience: risk-mcp
+      timeout: 60
+
+    - name: research
+      path_prefix: /research
+      backend_url: http://research-mcp:8012/mcp
+      required_scope: research:read
+      exchange_audience: research-mcp
+      timeout: 30

@@ -1,0 +1,181 @@
+services:
+  # ─── Identity Layer ─────────────────────────────────────────
+  keycloak:
+    build: ./keycloak
+    ports:
+      - "8080:8080"
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_HOSTNAME: localhost
+      KC_HOSTNAME_PORT: "8080"
+      KC_HOSTNAME_STRICT: "false"
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/9000 && echo -e 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && timeout 2 cat <&3 | grep -q UP"]
+      interval: 15s
+      timeout: 10s
+      retries: 30
+      start_period: 90s
+    networks:
+      - contextforge-mcp
+
+  # ─── Cache Layer ────────────────────────────────────────────
+  redis:
+    image: redis:7.4-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - contextforge-mcp
+
+  # ─── MCP Gateway ────────────────────────────────────────────
+  gateway:
+    build: ./gateway
+    ports:
+      - "9000:9000"
+    environment:
+      GATEWAY_KEYCLOAK_REALM_URL: http://localhost:8080/realms/trading
+      GATEWAY_KEYCLOAK_INTERNAL_URL: http://keycloak:8080/realms/trading
+      GATEWAY_KEYCLOAK_CLIENT_ID: mcp-gateway
+      GATEWAY_KEYCLOAK_CLIENT_SECRET: gateway-secret-2024
+      GATEWAY_REDIS_URL: redis://redis:6379/0
+      GATEWAY_ROUTES_FILE: /app/config/routes.yaml
+      GATEWAY_LOG_LEVEL: INFO
+    depends_on:
+      keycloak:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; r = httpx.get('http://localhost:9000/health'); r.raise_for_status()"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - contextforge-mcp
+
+  # ─── Bloomberg MCP Server ───────────────────────────────────
+  bloomberg-mcp:
+    build:
+      context: ./servers
+      dockerfile: bloomberg/Dockerfile
+    ports:
+      - "8010:8010"
+    environment:
+      KEYCLOAK_REALM_URL: http://keycloak:8080/realms/trading
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; r = httpx.get('http://localhost:8010/health'); exit(0 if r.status_code < 500 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - contextforge-mcp
+
+  # ─── Risk MCP Server ────────────────────────────────────────
+  risk-mcp:
+    build:
+      context: ./servers
+      dockerfile: risk/Dockerfile
+    ports:
+      - "8011:8011"
+    environment:
+      KEYCLOAK_REALM_URL: http://keycloak:8080/realms/trading
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; r = httpx.get('http://localhost:8011/health'); exit(0 if r.status_code < 500 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - contextforge-mcp
+
+  # ─── Research MCP Server ────────────────────────────────────
+  research-mcp:
+    build:
+      context: ./servers
+      dockerfile: research/Dockerfile
+    ports:
+      - "8012:8012"
+    environment:
+      KEYCLOAK_REALM_URL: http://keycloak:8080/realms/trading
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; r = httpx.get('http://localhost:8012/health'); exit(0 if r.status_code < 500 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - contextforge-mcp
+
+  # ─── Phase 2: Cognitive MCP Server ──────────────────────────
+  cognitive-mcp:
+    build: ./cognitive_server
+    ports:
+      - "8013:8013"
+    environment:
+      KEYCLOAK_REALM_URL: http://keycloak:8080/realms/trading
+      DATABASE_URL: postgresql://contextforge:contextforge@timescaledb:5432/cognitive
+    depends_on:
+      keycloak:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    networks:
+      - contextforge-mcp
+
+  # ─── Phase 2: TimescaleDB ──────────────────────────────────
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: contextforge
+      POSTGRES_PASSWORD: contextforge
+      POSTGRES_DB: cognitive
+    volumes:
+      - timescale-data:/var/lib/postgresql/data
+      - ./cognitive_server/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U contextforge -d cognitive"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - contextforge-mcp
+
+  # ─── Phase 3: Thesis Validation Orchestrator ────────────────
+  thesis-validator:
+    build: ./orchestrator
+    ports:
+      - "8014:8014"
+    environment:
+      KEYCLOAK_REALM_URL: http://keycloak:8080/realms/trading
+      GATEWAY_URL: http://gateway:9000
+    depends_on:
+      gateway:
+        condition: service_healthy
+    networks:
+      - contextforge-mcp
+
+volumes:
+  redis-data:
+  timescale-data:
+
+networks:
+  contextforge-mcp:
+    driver: bridge
